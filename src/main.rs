@@ -13,7 +13,11 @@ fn main() -> Result<()> {
 
     for i in 1i128.. {
         let data = [prefix.as_bytes(), &format!("{:x}", i).into_bytes()].concat();
-        let hash = Sha256::digest(&data);
+
+        let mut hasher = Sha256::new();
+        hasher.update(&data);
+        let hash = hasher.finalize();
+
         if hash[..].cmp(&min) == Ordering::Less {
             min = hash[..].try_into()?;
             println!("{} {}", String::from_utf8(data)?, hex::hex(&hash));
