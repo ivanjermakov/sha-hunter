@@ -14,7 +14,7 @@ mod hex;
 fn main() {
     let min = Arc::new(Mutex::new([1; 32]));
     let cpus = available_parallelism().unwrap().into();
-    println!("utilizing {cpus} treads");
+    println!("utilizing {cpus} threads");
 
     let handles = (0..cpus)
         .map(|n| {
