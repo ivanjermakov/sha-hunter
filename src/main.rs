@@ -19,8 +19,8 @@ fn main() {
     let handles = (0..cpus)
         .map(|n| {
             let prefix = env::args().nth(1).expect("no prefix arg");
-            let goal = hex!("0000000FFF");
-            let cpu_flag = format!("{:x}", n).into_bytes();
+            let goal = hex!("000000000F");
+            let cpu_flag = format!("{:02x}", n).into_bytes();
             let min = min.clone();
 
             spawn(move || {
@@ -28,7 +28,7 @@ fn main() {
                     let data = [
                         prefix.as_bytes(),
                         &cpu_flag,
-                        &format!("{:x}", i).into_bytes(),
+                        &format!("{:02x}", i).into_bytes(),
                     ]
                     .concat();
 
