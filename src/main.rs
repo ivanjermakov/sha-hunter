@@ -3,43 +3,60 @@ use std::{
     env,
     process::exit,
     sync::{Arc, Mutex},
+    thread::{available_parallelism, spawn},
 };
 
-use anyhow::{Context, Result};
 use hex_literal::hex;
-use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 
 mod hex;
 
-fn main() -> Result<()> {
-    let prefix = env::args().nth(1).context("prefix argument")?;
+fn main() {
     let min = Arc::new(Mutex::new([1; 32]));
-    let goal = hex!("000000000F");
+    let cpus = available_parallelism().unwrap().into();
+    println!("utilizing {cpus} treads");
 
-    (0..u64::MAX).into_par_iter().for_each(|i| {
-        let data = [prefix.as_bytes(), &format!("{:x}", i).into_bytes()].concat();
+    let handles = (0..cpus)
+        .map(|n| {
+            let prefix = env::args().nth(1).expect("no prefix arg");
+            let goal = hex!("0000000FFF");
+            let cpu_flag = format!("{:x}", n).into_bytes();
+            let min = min.clone();
 
-        let mut hasher = Sha256::new();
-        hasher.update(&data);
-        let hash = hasher.finalize();
+            spawn(move || {
+                for i in 0..u64::MAX {
+                    let data = [
+                        prefix.as_bytes(),
+                        &cpu_flag,
+                        &format!("{:x}", i).into_bytes(),
+                    ]
+                    .concat();
 
-        if hash[..].cmp(min.lock().unwrap().as_ref()) == Ordering::Less {
-            let v = min.clone();
-            let mut v = v.lock().unwrap();
-            *v = hash[..].try_into().unwrap();
-            println!(
-                "{: <32} {}",
-                String::from_utf8(data).unwrap(),
-                chunk(&hex::hex(&hash), 8)
-            );
-            if hash[..].cmp(&goal) == Ordering::Less {
-                exit(0);
-            }
-        }
-    });
+                    let mut hasher = Sha256::new();
+                    hasher.update(&data);
+                    let hash = hasher.finalize();
 
-    Ok(())
+                    if hash[..].cmp(min.lock().unwrap().as_ref()) == Ordering::Less {
+                        let v = min.clone();
+                        let mut v = v.lock().unwrap();
+                        *v = hash[..].try_into().unwrap();
+                        println!(
+                            "{: <32} {}",
+                            String::from_utf8(data).unwrap(),
+                            chunk(&hex::hex(&hash), 8)
+                        );
+                        if hash[..].cmp(&goal) == Ordering::Less {
+                            exit(0);
+                        }
+                    }
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
 }
 
 fn chunk(s: &str, n: usize) -> String {
