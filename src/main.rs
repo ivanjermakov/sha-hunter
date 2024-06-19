@@ -1,9 +1,27 @@
+use std::{cmp::Ordering, env};
+
+use anyhow::{Context, Result};
+use hex_literal::hex;
 use sha2::{Digest, Sha256};
 
 mod hex;
 
-fn main() {
-    let mut sha = Sha256::new();
-    sha.update(b"Hello, world!");
-    println!("{:}", hex::hex(&sha.finalize()));
+fn main() -> Result<()> {
+    let prefix = env::args().nth(1).context("prefix argument")?;
+    let mut min = [1; 32];
+    let goal = hex!("000004FF");
+
+    for i in 1i128.. {
+        let data = [prefix.as_bytes(), &format!("{:x}", i).into_bytes()].concat();
+        let hash = Sha256::digest(&data);
+        if hash[..].cmp(&min) == Ordering::Less {
+            min = hash[..].try_into()?;
+            println!("{} {}", String::from_utf8(data)?, hex::hex(&hash));
+            if hash[..].cmp(&goal) == Ordering::Less {
+                return Ok(());
+            }
+        }
+    }
+
+    Ok(())
 }
