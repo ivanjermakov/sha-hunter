@@ -13,7 +13,6 @@ pub fn build(b: *std.Build) void {
     });
     exe.addLibraryPath(.{ .cwd_relative = "." });
     exe.linkLibC();
-    exe.linkSystemLibrary("sha256");
 
     b.installArtifact(exe);
 

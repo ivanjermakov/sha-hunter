@@ -15,7 +15,7 @@ pub fn main() !void {
     const allocator = if (builtin.mode == .Debug) debug_allocator.allocator() else std.heap.c_allocator;
     _ = allocator;
 
-    var lib = try std.DynLib.open("./libsha256.so");
+    var lib = try std.DynLib.open("zig-out/libsha256.so");
     mcmCudaSha256HashBatch = lib.lookup(@TypeOf(mcmCudaSha256HashBatch), "mcm_cuda_sha256_hash_batch") orelse return error.NoSymbol;
 
     while (true) {
