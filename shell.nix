@@ -9,5 +9,7 @@ pkgs.mkShell {
     nativeBuildInputs = with pkgs; [
         cudaPackages.cuda_nvcc
         cudaPackages.cuda_cudart
+        cudaPackages.libcurand
+        cudaPackages.cuda_cccl
     ];
 }

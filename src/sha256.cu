@@ -4,10 +4,15 @@
 
 #include <stdlib.h>
 #include <memory.h>
+#include <curand_kernel.h>
 
 #define SHA256_BLOCK_SIZE 32
 #define MESSAGE_SIZE 14
-#define TARGET_NONCE 1
+#define RAND_SIZE 5
+#define TARGET_NONCE 3
+#define BLOCKS 1
+#define THREADS 1024
+#define HASHES_PER_CHECK 100
 
 typedef struct {
 	uint8_t data[64];
@@ -28,6 +33,8 @@ typedef struct {
 #define EP1(x) (ROTRIGHT(x,6) ^ ROTRIGHT(x,11) ^ ROTRIGHT(x,25))
 #define SIG0(x) (ROTRIGHT(x,7) ^ ROTRIGHT(x,18) ^ ((x) >> 3))
 #define SIG1(x) (ROTRIGHT(x,17) ^ ROTRIGHT(x,19) ^ ((x) >> 10))
+
+__constant__ const char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 __constant__ uint32_t k[64] = {
 	0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
@@ -150,33 +157,45 @@ __device__ void cuda_sha256_final(CUDA_SHA256_CTX *ctx, uint8_t hash[]) {
 }
 
 __global__ void hash_hunt(uint8_t* result, uint8_t* result_hash) {
-    while (result[0] == 0) {
-        char prefix[] = "ivnj-org/";
-        uint8_t in[MESSAGE_SIZE] = {0};
-        memcpy(in, prefix, 9);
-        uint8_t out[SHA256_BLOCK_SIZE];
-        CUDA_SHA256_CTX ctx;
-        cuda_sha256_init(&ctx);
-        cuda_sha256_update(&ctx, in, MESSAGE_SIZE);
-        cuda_sha256_final(&ctx, out);
+    curandState state;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    curand_init(1337, idx, blockIdx.x, &state);
 
-        uint8_t nonce = 0;
-        while (nonce < SHA256_BLOCK_SIZE) {
-            if (out[nonce] != 0) break;
-            nonce++;
-        }
-        if (nonce >= TARGET_NONCE) {
-            memcpy(result, in, MESSAGE_SIZE);
-            memcpy(result_hash, out, SHA256_BLOCK_SIZE);
+    while (result[0] == 0) {
+        for (size_t i = 0; i < HASHES_PER_CHECK; i++) {
+            uint8_t in[MESSAGE_SIZE];
+
+            char prefix[] = "ivnj-org/";
+            memcpy(in, prefix, 9);
+
+            for (int i = 0; i < RAND_SIZE; i++) {
+                int key = curand(&state) % (sizeof(charset) - 1);
+                in[MESSAGE_SIZE - RAND_SIZE + i] = charset[key];
+            }
+
+            uint8_t out[SHA256_BLOCK_SIZE];
+            CUDA_SHA256_CTX ctx;
+            cuda_sha256_init(&ctx);
+            cuda_sha256_update(&ctx, in, MESSAGE_SIZE);
+            cuda_sha256_final(&ctx, out);
+
+            uint8_t nonce = 0;
+            while (nonce < SHA256_BLOCK_SIZE) {
+                if (out[nonce] != 0) break;
+                nonce++;
+            }
+            if (nonce >= TARGET_NONCE) {
+                memcpy(result, in, MESSAGE_SIZE);
+                memcpy(result_hash, out, SHA256_BLOCK_SIZE);
+            }
         }
     }
 }
 
 extern "C" {
     int hunt() {
-        uint32_t blocks = 1;
-        uint32_t threads = 10;
         uint8_t* h_result = (uint8_t*)malloc(MESSAGE_SIZE);;
+        uint8_t* h_result_hash = (uint8_t*)malloc(SHA256_BLOCK_SIZE);;
         cudaError_t error;
 
         uint8_t* d_result;
@@ -185,13 +204,27 @@ extern "C" {
         cudaMemset(d_result, 0, MESSAGE_SIZE);
         cudaMalloc(&d_result_hash, SHA256_BLOCK_SIZE);
 
-        hash_hunt<<<blocks, threads>>>(d_result, d_result_hash);
+        hash_hunt<<<BLOCKS, THREADS>>>(d_result, d_result_hash);
 
         cudaDeviceSynchronize();
         error = cudaGetLastError();
         if (error != cudaSuccess) printf("error %s: %s\n", cudaGetErrorName(error), cudaGetErrorString(error));
 
+        cudaMemcpy(h_result, d_result, MESSAGE_SIZE, cudaMemcpyDeviceToHost);
+        cudaMemcpy(h_result_hash, d_result_hash, SHA256_BLOCK_SIZE, cudaMemcpyDeviceToHost);
+
+        if (h_result[0] == 0) {
+            printf("not found\n");
+        } else {
+            printf("%s ", h_result);
+            for (size_t i = 0; i < SHA256_BLOCK_SIZE; i++) {
+                printf("%02x", h_result_hash[i]);
+            }
+            printf("\n");
+        }
+
         free(h_result);
+        free(h_result_hash);
         cudaFree(d_result);
         cudaFree(d_result_hash);
 
