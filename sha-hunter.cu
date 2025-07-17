@@ -12,10 +12,6 @@ typedef struct {
 	uint32_t state[8];
 } CUDA_SHA256_CTX;
 
-#ifndef ROTLEFT
-#define ROTLEFT(a,b) (((a) << (b)) | ((a) >> (32-(b))))
-#endif
-
 #define ROTRIGHT(a,b) (((a) >> (b)) | ((a) << (32-(b))))
 
 #define CH(x,y,z) (((x) & (y)) ^ (~(x) & (z)))
@@ -36,8 +32,7 @@ __constant__ uint32_t k[64] = {
 	0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
 };
 
-__device__  __forceinline__ void cuda_sha256_transform(CUDA_SHA256_CTX *ctx, const uint8_t data[])
-{
+__device__  __forceinline__ void cuda_sha256_transform(CUDA_SHA256_CTX *ctx, const uint8_t data[]) {
 	uint32_t a, b, c, d, e, f, g, h, i, j, t1, t2, m[64];
 
 	for (i = 0, j = 0; i < 16; ++i, j += 4)
@@ -77,8 +72,7 @@ __device__  __forceinline__ void cuda_sha256_transform(CUDA_SHA256_CTX *ctx, con
 	ctx->state[7] += h;
 }
 
-__device__ void cuda_sha256_init(CUDA_SHA256_CTX *ctx)
-{
+__device__ void cuda_sha256_init(CUDA_SHA256_CTX *ctx) {
 	ctx->datalen = 0;
 	ctx->bitlen = 0;
 	ctx->state[0] = 0x6a09e667;
@@ -91,8 +85,7 @@ __device__ void cuda_sha256_init(CUDA_SHA256_CTX *ctx)
 	ctx->state[7] = 0x5be0cd19;
 }
 
-__device__ void cuda_sha256_update(CUDA_SHA256_CTX *ctx, const uint8_t data[], size_t len)
-{
+__device__ void cuda_sha256_update(CUDA_SHA256_CTX *ctx, const uint8_t data[], size_t len) {
 	uint32_t i;
 
 	for (i = 0; i < len; ++i) {
@@ -106,8 +99,7 @@ __device__ void cuda_sha256_update(CUDA_SHA256_CTX *ctx, const uint8_t data[], s
 	}
 }
 
-__device__ void cuda_sha256_final(CUDA_SHA256_CTX *ctx, uint8_t hash[])
-{
+__device__ void cuda_sha256_final(CUDA_SHA256_CTX *ctx, uint8_t hash[]) {
 	uint32_t i;
 
 	i = ctx->datalen;
@@ -152,8 +144,7 @@ __device__ void cuda_sha256_final(CUDA_SHA256_CTX *ctx, uint8_t hash[])
 	}
 }
 
-__global__ void kernel_sha256_hash(uint8_t* indata, uint32_t inlen, uint8_t* outdata, uint32_t n_batch)
-{
+__device__ void kernel_sha256_hash(uint8_t* indata, uint32_t inlen, uint8_t* outdata, uint32_t n_batch) {
 	uint32_t thread = blockIdx.x * blockDim.x + threadIdx.x;
 	if (thread >= n_batch)
 	{
@@ -167,28 +158,30 @@ __global__ void kernel_sha256_hash(uint8_t* indata, uint32_t inlen, uint8_t* out
 	cuda_sha256_final(&ctx, out);
 }
 
-void mcm_cuda_sha256_hash_batch(uint8_t* in, uint32_t inlen, uint8_t* out, uint32_t n_batch) {
-    uint8_t *cuda_indata;
-    uint8_t *cuda_outdata;
-    cudaMalloc(&cuda_indata, inlen * n_batch);
-    cudaMalloc(&cuda_outdata, SHA256_BLOCK_SIZE * n_batch);
-    cudaMemcpy(cuda_indata, in, inlen * n_batch, cudaMemcpyHostToDevice);
-
-    uint32_t thread = 256;
-    uint32_t block = (n_batch + thread - 1) / thread;
-
-    kernel_sha256_hash<<<block, thread>>>(cuda_indata, inlen, cuda_outdata, n_batch);
-    cudaMemcpy(out, cuda_outdata, SHA256_BLOCK_SIZE * n_batch, cudaMemcpyDeviceToHost);
-    cudaDeviceSynchronize();
-    cudaError_t error = cudaGetLastError();
-    if (error != cudaSuccess) {
-        printf("Error cuda sha256 hash: %s \n", cudaGetErrorString(error));
-    }
-    cudaFree(cuda_indata);
-    cudaFree(cuda_outdata);
+__global__ void kernel_hunt(bool* done) {
 }
 
 int main() {
     printf("Hello, CUDA!\n");
+
+    cudaError_t e;
+    e = cudaGetLastError();
+    if (e != cudaSuccess) printf("Error: %s \n", cudaGetErrorString(e));
+
+    bool* done;
+    cudaMalloc(&done, 1);
+
+    uint32_t blocks = 1;
+    uint32_t threads = 1;
+    kernel_hunt<<<blocks, threads>>>(done);
+
+    cudaDeviceSynchronize();
+
+    e = cudaGetLastError();
+    if (e != cudaSuccess) {
+        printf("Error: %s \n", cudaGetErrorString(e));
+    }
+
+    // cudaFree(done);
     return 0;
 }
