@@ -6,6 +6,8 @@
 #include <memory.h>
 
 #define SHA256_BLOCK_SIZE 32
+#define MESSAGE_SIZE 14
+#define TARGET_NONCE 1
 
 typedef struct {
 	uint8_t data[64];
@@ -147,39 +149,52 @@ __device__ void cuda_sha256_final(CUDA_SHA256_CTX *ctx, uint8_t hash[]) {
 	}
 }
 
-__global__ void kernel_sha256_hash(uint8_t* indata, uint32_t inlen, uint8_t* outdata, uint32_t n_batch) {
-	uint32_t thread = blockIdx.x * blockDim.x + threadIdx.x;
-	if (thread >= n_batch)
-	{
-		return;
-	}
-	uint8_t* in = indata  + thread * inlen;
-	uint8_t* out = outdata  + thread * SHA256_BLOCK_SIZE;
-	CUDA_SHA256_CTX ctx;
-	cuda_sha256_init(&ctx);
-	cuda_sha256_update(&ctx, in, inlen);
-	cuda_sha256_final(&ctx, out);
+__global__ void hash_hunt(uint8_t* result, uint8_t* result_hash) {
+    while (result[0] == 0) {
+        char prefix[] = "ivnj-org/";
+        uint8_t in[MESSAGE_SIZE] = {0};
+        memcpy(in, prefix, 9);
+        uint8_t out[SHA256_BLOCK_SIZE];
+        CUDA_SHA256_CTX ctx;
+        cuda_sha256_init(&ctx);
+        cuda_sha256_update(&ctx, in, MESSAGE_SIZE);
+        cuda_sha256_final(&ctx, out);
+
+        uint8_t nonce = 0;
+        while (nonce < SHA256_BLOCK_SIZE) {
+            if (out[nonce] != 0) break;
+            nonce++;
+        }
+        if (nonce >= TARGET_NONCE) {
+            memcpy(result, in, MESSAGE_SIZE);
+            memcpy(result_hash, out, SHA256_BLOCK_SIZE);
+        }
+    }
 }
 
 extern "C" {
-    void mcm_cuda_sha256_hash_batch(uint8_t* in, uint32_t inlen, uint8_t* out, uint32_t n_batch) {
-        uint8_t *cuda_indata;
-        uint8_t *cuda_outdata;
-        cudaMalloc(&cuda_indata, inlen * n_batch);
-        cudaMalloc(&cuda_outdata, SHA256_BLOCK_SIZE * n_batch);
-        cudaMemcpy(cuda_indata, in, inlen * n_batch, cudaMemcpyHostToDevice);
+    int hunt() {
+        uint32_t blocks = 1;
+        uint32_t threads = 10;
+        uint8_t* h_result = (uint8_t*)malloc(MESSAGE_SIZE);;
+        cudaError_t error;
 
-        uint32_t thread = 256;
-        uint32_t block = (n_batch + thread - 1) / thread;
+        uint8_t* d_result;
+        uint8_t* d_result_hash;
+        cudaMalloc(&d_result, MESSAGE_SIZE);
+        cudaMemset(d_result, 0, MESSAGE_SIZE);
+        cudaMalloc(&d_result_hash, SHA256_BLOCK_SIZE);
 
-        kernel_sha256_hash << < block, thread >> > (cuda_indata, inlen, cuda_outdata, n_batch);
-        cudaMemcpy(out, cuda_outdata, SHA256_BLOCK_SIZE * n_batch, cudaMemcpyDeviceToHost);
+        hash_hunt<<<blocks, threads>>>(d_result, d_result_hash);
+
         cudaDeviceSynchronize();
-        cudaError_t error = cudaGetLastError();
-        if (error != cudaSuccess) {
-            printf("Error cuda sha256 hash: %s \n", cudaGetErrorString(error));
-        }
-        cudaFree(cuda_indata);
-        cudaFree(cuda_outdata);
+        error = cudaGetLastError();
+        if (error != cudaSuccess) printf("error %s: %s\n", cudaGetErrorName(error), cudaGetErrorString(error));
+
+        free(h_result);
+        cudaFree(d_result);
+        cudaFree(d_result_hash);
+
+        return 0;
     }
 }
