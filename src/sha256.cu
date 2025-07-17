@@ -9,7 +9,7 @@
 #define SHA256_BLOCK_SIZE 32
 #define MESSAGE_SIZE 14
 #define RAND_SIZE 5
-#define TARGET_NONCE 3
+#define TARGET_NONCE 4
 #define BLOCKS 1
 #define THREADS 1024
 #define HASHES_PER_CHECK 100
@@ -159,7 +159,7 @@ __device__ void cuda_sha256_final(CUDA_SHA256_CTX *ctx, uint8_t hash[]) {
 __global__ void hash_hunt(uint8_t* result, uint8_t* result_hash) {
     curandState state;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    curand_init(1337, idx, blockIdx.x, &state);
+    curand_init(idx, 1337, 0, &state);
 
     while (result[0] == 0) {
         for (size_t i = 0; i < HASHES_PER_CHECK; i++) {
