@@ -1,37 +1,17 @@
-/*
- * sha256.cu Implementation of SHA256 Hashing
- *
- * Date: 12 June 2019
- * Revision: 1
- *
- * Based on the public domain Reference Implementation in C, by
- * Brad Conte, original code here:
- *
- * https://github.com/B-Con/crypto-algorithms
- *
- * This file is released into the Public Domain.
- */
-
-
-/*************************** HEADER FILES ***************************/
+#include <cstdint>
 #include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
 #include <memory.h>
-extern "C" {
-#include "sha256.cuh"
-}
-/****************************** MACROS ******************************/
-#define SHA256_BLOCK_SIZE 32            // SHA256 outputs a 32 byte digest
-
-/**************************** DATA TYPES ****************************/
+#define SHA256_BLOCK_SIZE 32
 
 typedef struct {
-	BYTE data[64];
-	WORD datalen;
+	uint8_t data[64];
+	uint32_t datalen;
 	unsigned long long bitlen;
-	WORD state[8];
+	uint32_t state[8];
 } CUDA_SHA256_CTX;
 
-/****************************** MACROS ******************************/
 #ifndef ROTLEFT
 #define ROTLEFT(a,b) (((a) << (b)) | ((a) >> (32-(b))))
 #endif
@@ -45,8 +25,7 @@ typedef struct {
 #define SIG0(x) (ROTRIGHT(x,7) ^ ROTRIGHT(x,18) ^ ((x) >> 3))
 #define SIG1(x) (ROTRIGHT(x,17) ^ ROTRIGHT(x,19) ^ ((x) >> 10))
 
-/**************************** VARIABLES *****************************/
-__constant__ WORD k[64] = {
+__constant__ uint32_t k[64] = {
 	0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
 	0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
 	0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
@@ -57,10 +36,9 @@ __constant__ WORD k[64] = {
 	0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
 };
 
-/*********************** FUNCTION DEFINITIONS ***********************/
-__device__  __forceinline__ void cuda_sha256_transform(CUDA_SHA256_CTX *ctx, const BYTE data[])
+__device__  __forceinline__ void cuda_sha256_transform(CUDA_SHA256_CTX *ctx, const uint8_t data[])
 {
-	WORD a, b, c, d, e, f, g, h, i, j, t1, t2, m[64];
+	uint32_t a, b, c, d, e, f, g, h, i, j, t1, t2, m[64];
 
 	for (i = 0, j = 0; i < 16; ++i, j += 4)
 		m[i] = (data[j] << 24) | (data[j + 1] << 16) | (data[j + 2] << 8) | (data[j + 3]);
@@ -113,9 +91,9 @@ __device__ void cuda_sha256_init(CUDA_SHA256_CTX *ctx)
 	ctx->state[7] = 0x5be0cd19;
 }
 
-__device__ void cuda_sha256_update(CUDA_SHA256_CTX *ctx, const BYTE data[], size_t len)
+__device__ void cuda_sha256_update(CUDA_SHA256_CTX *ctx, const uint8_t data[], size_t len)
 {
-	WORD i;
+	uint32_t i;
 
 	for (i = 0; i < len; ++i) {
 		ctx->data[ctx->datalen] = data[i];
@@ -128,9 +106,9 @@ __device__ void cuda_sha256_update(CUDA_SHA256_CTX *ctx, const BYTE data[], size
 	}
 }
 
-__device__ void cuda_sha256_final(CUDA_SHA256_CTX *ctx, BYTE hash[])
+__device__ void cuda_sha256_final(CUDA_SHA256_CTX *ctx, uint8_t hash[])
 {
-	WORD i;
+	uint32_t i;
 
 	i = ctx->datalen;
 
@@ -160,8 +138,8 @@ __device__ void cuda_sha256_final(CUDA_SHA256_CTX *ctx, BYTE hash[])
 	ctx->data[56] = ctx->bitlen >> 56;
 	cuda_sha256_transform(ctx, ctx->data);
 
-	// Since this implementation uses little endian byte ordering and SHA uses big endian,
-	// reverse all the bytes when copying the final state to the output hash.
+	// Since this implementation uses little endian uint8_t ordering and SHA uses big endian,
+	// reverse all the uint8_ts when copying the final state to the output hash.
 	for (i = 0; i < 4; ++i) {
 		hash[i]      = (ctx->state[0] >> (24 - i * 8)) & 0x000000ff;
 		hash[i + 4]  = (ctx->state[1] >> (24 - i * 8)) & 0x000000ff;
@@ -174,42 +152,43 @@ __device__ void cuda_sha256_final(CUDA_SHA256_CTX *ctx, BYTE hash[])
 	}
 }
 
-__global__ void kernel_sha256_hash(BYTE* indata, WORD inlen, BYTE* outdata, WORD n_batch)
+__global__ void kernel_sha256_hash(uint8_t* indata, uint32_t inlen, uint8_t* outdata, uint32_t n_batch)
 {
-	WORD thread = blockIdx.x * blockDim.x + threadIdx.x;
+	uint32_t thread = blockIdx.x * blockDim.x + threadIdx.x;
 	if (thread >= n_batch)
 	{
 		return;
 	}
-	BYTE* in = indata  + thread * inlen;
-	BYTE* out = outdata  + thread * SHA256_BLOCK_SIZE;
+	uint8_t* in = indata  + thread * inlen;
+	uint8_t* out = outdata  + thread * SHA256_BLOCK_SIZE;
 	CUDA_SHA256_CTX ctx;
 	cuda_sha256_init(&ctx);
 	cuda_sha256_update(&ctx, in, inlen);
 	cuda_sha256_final(&ctx, out);
 }
 
-extern "C"
-{
-void mcm_cuda_sha256_hash_batch(BYTE* in, WORD inlen, BYTE* out, WORD n_batch)
-{
-	BYTE *cuda_indata;
-	BYTE *cuda_outdata;
-	cudaMalloc(&cuda_indata, inlen * n_batch);
-	cudaMalloc(&cuda_outdata, SHA256_BLOCK_SIZE * n_batch);
-	cudaMemcpy(cuda_indata, in, inlen * n_batch, cudaMemcpyHostToDevice);
+void mcm_cuda_sha256_hash_batch(uint8_t* in, uint32_t inlen, uint8_t* out, uint32_t n_batch) {
+    uint8_t *cuda_indata;
+    uint8_t *cuda_outdata;
+    cudaMalloc(&cuda_indata, inlen * n_batch);
+    cudaMalloc(&cuda_outdata, SHA256_BLOCK_SIZE * n_batch);
+    cudaMemcpy(cuda_indata, in, inlen * n_batch, cudaMemcpyHostToDevice);
 
-	WORD thread = 256;
-	WORD block = (n_batch + thread - 1) / thread;
+    uint32_t thread = 256;
+    uint32_t block = (n_batch + thread - 1) / thread;
 
-	kernel_sha256_hash << < block, thread >> > (cuda_indata, inlen, cuda_outdata, n_batch);
-	cudaMemcpy(out, cuda_outdata, SHA256_BLOCK_SIZE * n_batch, cudaMemcpyDeviceToHost);
-	cudaDeviceSynchronize();
-	cudaError_t error = cudaGetLastError();
-	if (error != cudaSuccess) {
-		printf("Error cuda sha256 hash: %s \n", cudaGetErrorString(error));
-	}
-	cudaFree(cuda_indata);
-	cudaFree(cuda_outdata);
+    kernel_sha256_hash<<<block, thread>>>(cuda_indata, inlen, cuda_outdata, n_batch);
+    cudaMemcpy(out, cuda_outdata, SHA256_BLOCK_SIZE * n_batch, cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
+    cudaError_t error = cudaGetLastError();
+    if (error != cudaSuccess) {
+        printf("Error cuda sha256 hash: %s \n", cudaGetErrorString(error));
+    }
+    cudaFree(cuda_indata);
+    cudaFree(cuda_outdata);
 }
+
+int main() {
+    printf("Hello, CUDA!\n");
+    return 0;
 }
