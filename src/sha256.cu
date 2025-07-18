@@ -204,6 +204,7 @@ extern "C" {
         cudaMemset(d_result, 0, MESSAGE_SIZE);
         cudaMalloc(&d_result_hash, SHA256_BLOCK_SIZE);
 
+        cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
         hash_hunt<<<BLOCKS, THREADS>>>(d_result, d_result_hash);
 
         cudaDeviceSynchronize();
