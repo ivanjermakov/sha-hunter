@@ -7,9 +7,9 @@
 #include <curand_kernel.h>
 
 #define SHA256_BLOCK_SIZE 32
-#define MESSAGE_SIZE 14
-#define RAND_SIZE 5
-#define TARGET_NONCE 4
+#define MESSAGE_SIZE 17
+#define RAND_SIZE 8
+#define TARGET_NONCE 5
 #define BLOCKS 1
 #define THREADS 1024
 #define HASHES_PER_CHECK 100
